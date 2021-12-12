@@ -22,6 +22,8 @@ from Qt import QtWidgets
 
 def property_mixin(cls):
     """Run function after dynamic property value changed"""
+    if not getattr(cls, "__dayu_property_mixin__", None):
+        return cls
 
     def _new_event(self, event):
         if event.type() == QtCore.QEvent.DynamicPropertyChange:
@@ -31,6 +33,7 @@ def property_mixin(cls):
                 callback(self.property(str(prp)))
         return super(cls, self).event(event)
 
+    setattr(cls, "__dayu_property_mixin__", True)
     setattr(cls, "event", _new_event)
     return cls
 
@@ -165,10 +168,12 @@ def stacked_animation_mixin(cls):
     """
     if not _stackable(cls):  # If widget can't stack, return the original widget class
         return cls
+    cls = property_mixin(cls)
     old_init = cls.__init__
 
     def _new_init(self, *args, **kwargs):
         old_init(self, *args, **kwargs)
+
         self._previous_index = 0
         self._to_show_pos_ani = QtCore.QPropertyAnimation()
         self._to_show_pos_ani.setDuration(400)
@@ -191,10 +196,19 @@ def stacked_animation_mixin(cls):
         self._opacity_ani.setEndValue(1.0)
         self._opacity_ani.setTargetObject(self._opacity_eff)
         self._opacity_ani.finished.connect(self._disable_opacity)
-        self.currentChanged.connect(self._play_anim)
+
+        self.setProperty("animatable", True)
+
+    def _set_animatable(self, value):
+        if value:
+            self.currentChanged.connect(self._play_anim)
+        else:
+            self.currentChanged.disconnect(self._play_anim)
 
     def _play_anim(self, index):
         current_widget = self.widget(index)
+        if not current_widget:
+            return
         if self._previous_index < index:
             self._to_show_pos_ani.setStartValue(QtCore.QPoint(self.width(), 0))
             self._to_show_pos_ani.setTargetObject(current_widget)
@@ -215,5 +229,6 @@ def stacked_animation_mixin(cls):
 
     setattr(cls, "__init__", _new_init)
     setattr(cls, "_play_anim", _play_anim)
+    setattr(cls, "_set_animatable", _set_animatable)
     setattr(cls, "_disable_opacity", _disable_opacity)
     return cls
