@@ -12,6 +12,8 @@ from __future__ import division
 from __future__ import print_function
 
 # Import built-in modules
+from collections import OrderedDict
+from collections import defaultdict
 from functools import partial
 
 # Import third-party modules
@@ -25,6 +27,8 @@ from dayu_widgets import dayu_theme
 from dayu_widgets.mixin import cursor_mixin
 from dayu_widgets.mixin import property_mixin
 from dayu_widgets.mixin import stacked_animation_mixin
+from dayu_widgets.splitter import MSplitter
+from dayu_widgets.text_edit import MTextEdit
 
 
 @cursor_mixin
@@ -39,9 +43,8 @@ class MTabBar(QtWidgets.QTabBar):
         self.dragging = False
 
         # self.setAcceptDrops(True)
-
+        self.setProperty("draggable", True)
         self.setDrawBase(False)
-        self.setMovable(True)
         self.setMouseTracking(True)
 
     def tabSizeHint(self, index):
@@ -74,6 +77,7 @@ class MTabBar(QtWidgets.QTabBar):
         condition &= index != -1
         # NOTES(timmyliang): trigger when it drag out of tabbar
         condition &= not self.rect().contains(event.pos())
+        condition &= bool(self.property("draggable"))
 
         if condition:
             self.sig_start_drag.emit(index)
@@ -146,11 +150,28 @@ class MTabWidget(QtWidgets.QTabWidget):
         self.overlay.sig_painted.connect(self.slot_painted)
 
         # TODO(timmyliang) add MSplitter for resize
+        self.splitter = MSplitter()
 
-        self.setAcceptDrops(True)
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.splitter)
+        self.setLayout(layout)
+
+        self.setMovable(True)
         self.setProperty("draggable", True)
+        self.setProperty("hint_size", 5)
+        self.setProperty("hint_opacity", 0.5)
+        self.setProperty("hint_color", dayu_theme.blue)
+
         self.is_new_window = True
         self.is_dragging = False
+        self.on_border_index = -1
+        self.on_tab_index = -1
+        self.rect_data = defaultdict(dict)
+
+    def _set_draggable(self, value):
+        self.setAcceptDrops(value)
+        self.bar.setProperty("draggable", value)
 
     @property
     def is_dragging(self):
@@ -160,35 +181,6 @@ class MTabWidget(QtWidgets.QTabWidget):
     def is_dragging(self, value):
         self.overlay.setVisible(value)
         self._is_dragging = value
-
-    def _bar_auto_hide(self, widget=None):
-        widget = widget or self
-        count = widget.count()
-        print(count)
-        if not count:
-            widget.close()
-        elif count == 1:
-            if widget.windowFlags() & QtCore.Qt.Window:
-                widget.bar.setVisible(False)
-        elif not widget.bar.isVisible():
-            widget.bar.setVisible(True)
-
-    def copy(self, parent=None):
-        parent = parent or self
-        widget = MTabWidget(parent)
-
-        meta = parent.metaObject()
-        props = [bytes(p).decode("utf-8") for p in parent.dynamicPropertyNames()]
-        props += [meta.property(i).name() for i in range(meta.propertyCount())]
-
-        for prop_name in props:
-            if prop_name.startswith("_"):
-                continue
-            val = parent.property(prop_name)
-            if val is not None:
-                widget.setProperty(prop_name, val)
-
-        return widget
 
     def slot_drag_tab(self, index):
         # type: (QtWidgets.QTabWidget,int) -> None
@@ -244,34 +236,67 @@ class MTabWidget(QtWidgets.QTabWidget):
 
     def slot_painted(self, painter):
 
+        pos = QtGui.QCursor.pos()
+        pos = self.mapFromGlobal(pos)
+
         rect = self.rect()
+        self.on_border_index = -1
+        self.on_tab_index = -1
+        for index, rect in enumerate(self.rect_data.get("border", [])):
+            if rect.contains(pos):
+                self.on_border_index = index
+                break
+        else:
+            rect_tab = self.rect_data.get("rect_tab", {})
+            for index, (_rect, rect) in enumerate(rect_tab.items()):
+                if _rect.contains(pos):
+                    self.on_tab_index = index
+                    break
 
-        height = 10
-        top_left = rect.topLeft()
-        bottom_right = QtCore.QPoint(rect.topRight().x(), height)
-        # top_left = rect.bottomLeft() + QtCore.QPoint(0,height)
-        # bottom_right = rect.bottomRight()
-        color = QtGui.QColor(dayu_theme.blue)
-        painter.fillRect(QtCore.QRect(top_left, bottom_right), color)
-
-    def _get_drag_data(self, event):
-        data = event.mimeData()
-        buff = data.data(self.MINE)
-        if not buff:
-            return event.ignore()
-        return buff
+        color = QtGui.QColor(self.property("hint_color"))
+        painter.setOpacity(self.property("hint_opacity"))
+        painter.fillRect(rect, color)
 
     def dragEnterEvent(self, event):
         super(MTabWidget, self).dragEnterEvent(event)
         self.is_dragging = True
         if self._get_drag_data(event):
+            rect = self.rect()
+            size = self.property("hint_size")
+            tf = rect.topLeft()
+            br = rect.topRight() + QtCore.QPoint(0, size)
+            rect_N = QtCore.QRect(tf, br)
+            tf = rect.topRight() - QtCore.QPoint(size, 0)
+            br = rect.bottomRight()
+            rect_E = QtCore.QRect(tf, br)
+            tf = rect.bottomLeft() - QtCore.QPoint(0, size)
+            br = rect.bottomRight()
+            rect_S = QtCore.QRect(tf, br)
+            tf = rect.topLeft()
+            br = rect.bottomLeft() + QtCore.QPoint(size, 0)
+            rect_W = QtCore.QRect(tf, br)
+
+            self.rect_data["border"] = [rect_N, rect_E, rect_S, rect_W]
+            tab_rect = rect_W
+            rect_tab = OrderedDict()
+            for i in range(self.bar.count()):
+                tab_rect = self.bar.tabRect(i)
+                tf = tab_rect.topLeft()
+                br = QtCore.QPoint(tab_rect.bottomRight().x(), rect.bottomRight().y())
+                rect_tab[QtCore.QRect(tf, br)] = tab_rect
+
+            # NOTES(timmyliang): left area
+            tf = tab_rect.topRight()
+            br = rect.bottomRight()
+            rect = QtCore.QRect(tf, QtCore.QPoint(br.x(), tab_rect.bottomRight().y()))
+            rect_tab[QtCore.QRect(tf, br)] = rect
+            self.rect_data["rect_tab"] = rect_tab
             event.accept()
 
     def dragMoveEvent(self, event):
         super(MTabWidget, self).dragMoveEvent(event)
         buff = self._get_drag_data(event)
 
-        # TODO draw position calc
         self.overlay.repaint()
 
         event.accept()
@@ -288,8 +313,11 @@ class MTabWidget(QtWidgets.QTabWidget):
         widget = source.widget(index)
 
         # TODO add tab base on position index
-
-        self.addTab(widget, label)
+        if self.on_tab_index >= 0:
+            self.insertTab(self.on_tab_index, widget, label)
+            self.setCurrentIndex(self.on_tab_index)
+        elif self.on_border_index >= 0:
+            pass
 
         self._bar_auto_hide()
         self._bar_auto_hide(source)
@@ -297,3 +325,42 @@ class MTabWidget(QtWidgets.QTabWidget):
     def dragLeaveEvent(self, event):
         self.is_dragging = False
         event.accept()
+
+    def setMovable(self, value):
+        self.bar.setMovable(value)
+
+    def _get_drag_data(self, event):
+        data = event.mimeData()
+        buff = data.data(self.MINE)
+        if not buff:
+            return event.ignore()
+        return buff
+
+    def _bar_auto_hide(self, widget=None):
+        widget = widget or self
+        count = widget.count()
+        is_window = widget.windowFlags() & QtCore.Qt.Window
+        if is_window:
+            if not count:
+                widget.close()
+            # elif count == 1:
+            #     widget.bar.setVisible(False)
+            # elif not widget.bar.isVisible():
+            #     widget.bar.setVisible(True)
+
+    def copy(self, parent=None):
+        parent = parent or self
+        widget = MTabWidget(parent)
+
+        meta = parent.metaObject()
+        props = [bytes(p).decode("utf-8") for p in parent.dynamicPropertyNames()]
+        props += [meta.property(i).name() for i in range(meta.propertyCount())]
+
+        for prop_name in props:
+            if prop_name.startswith("_"):
+                continue
+            val = parent.property(prop_name)
+            if val is not None:
+                widget.setProperty(prop_name, val)
+
+        return widget
