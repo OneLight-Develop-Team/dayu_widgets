@@ -22,7 +22,7 @@ from Qt import QtWidgets
 
 def property_mixin(cls):
     """Run function after dynamic property value changed"""
-    if not getattr(cls, "__dayu_property_mixin__", None):
+    if getattr(cls, "__dayu_property_mixin__", None):
         return cls
 
     def _new_event(self, event):
