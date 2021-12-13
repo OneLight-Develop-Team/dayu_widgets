@@ -161,6 +161,18 @@ class MTabWidget(QtWidgets.QTabWidget):
         self.overlay.setVisible(value)
         self._is_dragging = value
 
+    def _bar_auto_hide(self, widget=None):
+        widget = widget or self
+        count = widget.count()
+        print(count)
+        if not count:
+            widget.close()
+        elif count == 1:
+            if widget.windowFlags() & QtCore.Qt.Window:
+                widget.bar.setVisible(False)
+        elif not widget.bar.isVisible():
+            widget.bar.setVisible(True)
+
     def copy(self, parent=None):
         parent = parent or self
         widget = MTabWidget(parent)
@@ -206,13 +218,13 @@ class MTabWidget(QtWidgets.QTabWidget):
         painter.end()
 
         drag.setPixmap(pixmap)
-        drag.destroyed.connect(partial(self.slot_drag_destroyed, index))
+        drag.destroyed.connect(partial(self.slot_dropped, index))
         drag.start(QtCore.Qt.MoveAction)
 
     def slot_bar_press(self, bar):
         self.bar_pixmap = bar.grab(bar.tabRect(bar.currentIndex()))
 
-    def slot_drag_destroyed(self, index):
+    def slot_dropped(self, index):
 
         if not self.is_new_window:
             self.is_new_window = True
@@ -228,8 +240,7 @@ class MTabWidget(QtWidgets.QTabWidget):
         tab.raise_()
         tab.setFocus()
 
-        if not self.count():
-            self.close()
+        self._bar_auto_hide(tab)
 
     def slot_painted(self, painter):
 
@@ -277,10 +288,11 @@ class MTabWidget(QtWidgets.QTabWidget):
         widget = source.widget(index)
 
         # TODO add tab base on position index
+
         self.addTab(widget, label)
 
-        if not source.count():
-            source.close()
+        self._bar_auto_hide()
+        self._bar_auto_hide(source)
 
     def dragLeaveEvent(self, event):
         self.is_dragging = False
