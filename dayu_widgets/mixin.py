@@ -207,8 +207,12 @@ def stacked_animation_mixin(cls):
 
     def _play_anim(self, index):
         current_widget = self.widget(index)
-        if not current_widget:
+        condition = not current_widget
+        condition |= self._to_show_pos_ani.state() == QtCore.QPropertyAnimation.Running
+        condition |= self._to_hide_pos_ani.state() == QtCore.QPropertyAnimation.Running
+        if condition:
             return
+
         if self._previous_index < index:
             self._to_show_pos_ani.setStartValue(QtCore.QPoint(self.width(), 0))
             self._to_show_pos_ani.setTargetObject(current_widget)
@@ -225,7 +229,10 @@ def stacked_animation_mixin(cls):
     def _disable_opacity(self):
         # 如果不关掉effect，会跟子控件的 effect 或 paintEvent 冲突引起 crash
         # QPainter::begin: A paint device can only be painted by one painter at a time.
-        self.currentWidget().graphicsEffect().setEnabled(False)
+        widget = self.currentWidget()
+        if widget:
+            effect = widget.graphicsEffect()
+            effect and effect.setEnabled(False)
 
     setattr(cls, "__init__", _new_init)
     setattr(cls, "_play_anim", _play_anim)
