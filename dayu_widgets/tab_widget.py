@@ -14,6 +14,7 @@ from __future__ import print_function
 # Import built-in modules
 from collections import OrderedDict
 from collections import defaultdict
+from collections import namedtuple
 from functools import partial
 
 # Import third-party modules
@@ -134,7 +135,12 @@ class MTabOverlay(QtWidgets.QWidget):
 @property_mixin
 @stacked_animation_mixin
 class MTabWidget(QtWidgets.QTabWidget):
+
+    DIRECTIONS = "E S W N"
+    DIRECTION = namedtuple("Direction", DIRECTIONS)(0, 1, 2, 3)
     sig_tab_drag = QtCore.Signal(QtWidgets.QWidget)
+    sig_tab_drop = QtCore.Signal(int)
+    sig_border_drop = QtCore.Signal(QtWidgets.QWidget, int, int)
     MINE = "application/dayu_tab_data"
 
     def __init__(self, parent=None):
@@ -149,20 +155,15 @@ class MTabWidget(QtWidgets.QTabWidget):
         self.overlay = MTabOverlay(self)
         self.overlay.sig_painted.connect(self.slot_painted)
 
-        # TODO(timmyliang) add MSplitter for resize
-        self.splitter = MSplitter()
-
-        layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.splitter)
-        self.setLayout(layout)
+        self.sig_border_drop.connect(self.slot_border_drop)
 
         self.setMovable(True)
-        self.setProperty("draggable", True)
         self.setProperty("hint_size", 5)
+        self.setProperty("draggable", True)
         self.setProperty("hint_opacity", 0.5)
         self.setProperty("hint_color", dayu_theme.blue)
 
+        self.is_in_container = False
         self.is_new_window = True
         self.is_dragging = False
         self.on_border_index = -1
@@ -187,8 +188,6 @@ class MTabWidget(QtWidgets.QTabWidget):
         drag = QtGui.QDrag(self)
         data = QtCore.QMimeData(self)
 
-        # TODO Drag data
-        # widget = self.widget(index)
         buff = cPickle.dumps(index)
         data.setData(self.MINE, QtCore.QByteArray(buff))
         drag.setMimeData(data)
@@ -239,23 +238,72 @@ class MTabWidget(QtWidgets.QTabWidget):
         pos = QtGui.QCursor.pos()
         pos = self.mapFromGlobal(pos)
 
+        color = QtGui.QColor(self.property("hint_color"))
+        painter.setOpacity(self.property("hint_opacity"))
+
         rect = self.rect()
+        tl = rect.topLeft()
+        rb = rect.bottomRight()
+
         self.on_border_index = -1
         self.on_tab_index = -1
+
         for index, rect in enumerate(self.rect_data.get("border", [])):
             if rect.contains(pos):
                 self.on_border_index = index
                 break
         else:
+
             rect_tab = self.rect_data.get("rect_tab", {})
             for index, (_rect, rect) in enumerate(rect_tab.items()):
                 if _rect.contains(pos):
                     self.on_tab_index = index
                     break
 
-        color = QtGui.QColor(self.property("hint_color"))
-        painter.setOpacity(self.property("hint_opacity"))
+            rect_widget = QtCore.QRect(tl + QtCore.QPoint(0, rect.height()), rb)
+            painter.fillRect(rect_widget, color)
+
         painter.fillRect(rect, color)
+
+    def slot_border_drop(self, source, index, direction):
+
+        DIRECTIONS = "E S W N"
+
+        orient = QtCore.Qt.Vertical if direction in [1, 3] else QtCore.Qt.Horizontal
+        is_after = direction in [2, 3]
+        # TODO if splitter already exists not to create new one
+        parent = self.parent()
+        label = source.tabText(index)
+        widget = source.widget(index)
+        inst = self.copy()
+        inst.is_in_container = True
+        inst.addTab(widget, label)
+        if isinstance(parent, QtWidgets.QSplitter):
+            self.splitter = parent
+            if orient == self.splitter.orientation():
+                splitter_index = self.splitter.indexOf(self)
+                splitter_index = splitter_index if is_after else splitter_index + 1
+                self.splitter.insertWidget(splitter_index, inst)
+                return
+
+        expanding = QtWidgets.QSizePolicy.Expanding
+        self.setSizePolicy(expanding, expanding)
+        self.setMinimumHeight(150)
+        self.is_in_container = False
+
+        this = self.copy(True)
+        this.is_in_container = True
+
+        self.splitter = QtWidgets.QSplitter()
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.splitter)
+        self.setLayout(layout)
+        widget_list = [inst, this] if is_after else [this, inst]
+        for w in widget_list:
+            self.splitter.addWidget(w)
+
+        self.splitter.setOrientation(orient)
 
     def dragEnterEvent(self, event):
         super(MTabWidget, self).dragEnterEvent(event)
@@ -263,43 +311,41 @@ class MTabWidget(QtWidgets.QTabWidget):
         if self._get_drag_data(event):
             rect = self.rect()
             size = self.property("hint_size")
-            tf = rect.topLeft()
+            tl = rect.topLeft()
             br = rect.topRight() + QtCore.QPoint(0, size)
-            rect_N = QtCore.QRect(tf, br)
-            tf = rect.topRight() - QtCore.QPoint(size, 0)
+            rect_N = QtCore.QRect(tl, br)
+            tl = rect.topRight() - QtCore.QPoint(size, 0)
             br = rect.bottomRight()
-            rect_E = QtCore.QRect(tf, br)
-            tf = rect.bottomLeft() - QtCore.QPoint(0, size)
+            rect_E = QtCore.QRect(tl, br)
+            tl = rect.bottomLeft() - QtCore.QPoint(0, size)
             br = rect.bottomRight()
-            rect_S = QtCore.QRect(tf, br)
-            tf = rect.topLeft()
+            rect_S = QtCore.QRect(tl, br)
+            tl = rect.topLeft()
             br = rect.bottomLeft() + QtCore.QPoint(size, 0)
-            rect_W = QtCore.QRect(tf, br)
+            rect_W = QtCore.QRect(tl, br)
 
-            self.rect_data["border"] = [rect_N, rect_E, rect_S, rect_W]
+            self.rect_data["border"] = [rect_E, rect_S, rect_W, rect_N]
             tab_rect = rect_W
             rect_tab = OrderedDict()
             for i in range(self.bar.count()):
                 tab_rect = self.bar.tabRect(i)
-                tf = tab_rect.topLeft()
+                tl = tab_rect.topLeft()
                 br = QtCore.QPoint(tab_rect.bottomRight().x(), rect.bottomRight().y())
-                rect_tab[QtCore.QRect(tf, br)] = tab_rect
+                rect_tab[QtCore.QRect(tl, br)] = tab_rect
 
             # NOTES(timmyliang): left area
-            tf = tab_rect.topRight()
+            tl = tab_rect.topRight()
             br = rect.bottomRight()
-            rect = QtCore.QRect(tf, QtCore.QPoint(br.x(), tab_rect.bottomRight().y()))
-            rect_tab[QtCore.QRect(tf, br)] = rect
+            rect = QtCore.QRect(tl, QtCore.QPoint(br.x(), tab_rect.bottomRight().y()))
+            rect_tab[QtCore.QRect(tl, br)] = rect
             self.rect_data["rect_tab"] = rect_tab
             event.accept()
 
     def dragMoveEvent(self, event):
         super(MTabWidget, self).dragMoveEvent(event)
-        buff = self._get_drag_data(event)
-
-        self.overlay.repaint()
-
-        event.accept()
+        if self._get_drag_data(event):
+            self.overlay.repaint()
+            event.accept()
 
     def dropEvent(self, event):
         self.is_dragging = False
@@ -312,13 +358,12 @@ class MTabWidget(QtWidgets.QTabWidget):
         label = source.tabText(index)
         widget = source.widget(index)
 
-        # TODO add tab base on position index
         if self.on_tab_index >= 0:
             self.insertTab(self.on_tab_index, widget, label)
             self.setCurrentIndex(self.on_tab_index)
+            self.sig_tab_drop.emit(self.on_tab_index)
         elif self.on_border_index >= 0:
-            pass
-
+            self.sig_border_drop.emit(source, index, self.on_border_index)
         self._bar_auto_hide()
         self._bar_auto_hide(source)
 
@@ -340,27 +385,35 @@ class MTabWidget(QtWidgets.QTabWidget):
         widget = widget or self
         count = widget.count()
         is_window = widget.windowFlags() & QtCore.Qt.Window
-        if is_window:
-            if not count:
-                widget.close()
+        # TODO close tab and remove splitter
+        if not count and (is_window or self.is_in_container):
+            print("close")
+            widget.close()
             # elif count == 1:
             #     widget.bar.setVisible(False)
             # elif not widget.bar.isVisible():
             #     widget.bar.setVisible(True)
 
-    def copy(self, parent=None):
-        parent = parent or self
-        widget = MTabWidget(parent)
+    def copy(self, tab=False):
+        inst = MTabWidget(self)
 
-        meta = parent.metaObject()
-        props = [bytes(p).decode("utf-8") for p in parent.dynamicPropertyNames()]
+        meta = self.metaObject()
+        props = [bytes(p).decode("utf-8") for p in self.dynamicPropertyNames()]
         props += [meta.property(i).name() for i in range(meta.propertyCount())]
 
         for prop_name in props:
             if prop_name.startswith("_"):
                 continue
-            val = parent.property(prop_name)
+            val = self.property(prop_name)
             if val is not None:
-                widget.setProperty(prop_name, val)
+                inst.setProperty(prop_name, val)
 
-        return widget
+        if tab:
+            for index in range(self.count())[::-1]:
+                widget = self.widget(index)
+                label = self.tabText(index)
+                inst.addTab(widget, label)
+
+            # self.addTab(MTextEdit(), "EMPTY")
+
+        return inst
