@@ -242,8 +242,6 @@ class MTabWidget(QtWidgets.QTabWidget):
         painter.setOpacity(self.property("hint_opacity"))
 
         rect = self.rect()
-        tl = rect.topLeft()
-        rb = rect.bottomRight()
 
         self.on_border_index = -1
         self.on_tab_index = -1
@@ -260,14 +258,19 @@ class MTabWidget(QtWidgets.QTabWidget):
                     self.on_tab_index = index
                     break
 
-            rect_widget = QtCore.QRect(tl + QtCore.QPoint(0, rect.height()), rb)
+            rect_widget = self.rect_data["rect_widget"]
             painter.fillRect(rect_widget, color)
 
         painter.fillRect(rect, color)
 
     def slot_border_drop(self, source, index, direction):
 
-        DIRECTIONS = "E S W N"
+        # DIRECTIONS = "E S W N"
+
+        expanding = QtWidgets.QSizePolicy.Expanding
+        self.setSizePolicy(expanding, expanding)
+        self.setMinimumHeight(150)
+        self.is_in_container = False
 
         orient = QtCore.Qt.Vertical if direction in [1, 3] else QtCore.Qt.Horizontal
         is_after = direction in [2, 3]
@@ -285,11 +288,6 @@ class MTabWidget(QtWidgets.QTabWidget):
                 splitter_index = splitter_index if is_after else splitter_index + 1
                 self.splitter.insertWidget(splitter_index, inst)
                 return
-
-        expanding = QtWidgets.QSizePolicy.Expanding
-        self.setSizePolicy(expanding, expanding)
-        self.setMinimumHeight(150)
-        self.is_in_container = False
 
         this = self.copy(True)
         this.is_in_container = True
@@ -333,12 +331,18 @@ class MTabWidget(QtWidgets.QTabWidget):
                 br = QtCore.QPoint(tab_rect.bottomRight().x(), rect.bottomRight().y())
                 rect_tab[QtCore.QRect(tl, br)] = tab_rect
 
+            tl = rect.topLeft()
+            br = rect.bottomRight()
+            rect_widget = QtCore.QRect(tl + QtCore.QPoint(0, tab_rect.height()), br)
+            self.rect_data["rect_widget"] = rect_widget
+
             # NOTES(timmyliang): left area
             tl = tab_rect.topRight()
             br = rect.bottomRight()
             rect = QtCore.QRect(tl, QtCore.QPoint(br.x(), tab_rect.bottomRight().y()))
             rect_tab[QtCore.QRect(tl, br)] = rect
             self.rect_data["rect_tab"] = rect_tab
+
             event.accept()
 
     def dragMoveEvent(self, event):
