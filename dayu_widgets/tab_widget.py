@@ -28,6 +28,7 @@ from dayu_widgets import dayu_theme
 from dayu_widgets.mixin import cursor_mixin
 from dayu_widgets.mixin import property_mixin
 from dayu_widgets.mixin import stacked_animation_mixin
+from dayu_widgets.push_button import MPushButton
 from dayu_widgets.splitter import MSplitter
 from dayu_widgets.text_edit import MTextEdit
 
@@ -110,11 +111,22 @@ class MTabOverlay(QtWidgets.QWidget):
         super(MTabOverlay, self).__init__(parent)
         self.tab = parent
         self.setAttribute(QtCore.Qt.WA_NoSystemBackground)
-        self.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
-        flags = QtCore.Qt.WindowTransparentForInput | QtCore.Qt.FramelessWindowHint
-        self.setWindowFlags(flags)
         self.setFocusPolicy(QtCore.Qt.NoFocus)
         parent.installEventFilter(self)
+
+        self.button = MPushButton()
+        self.button.setText(self.tr("remove pannel"))
+        self.button.clicked.connect(parent.deleteLater)
+        self.button.setVisible(False)
+        parent.installEventFilter(self)
+
+        layout = QtWidgets.QVBoxLayout()
+        inside_layout = QtWidgets.QHBoxLayout()
+        inside_layout.addStretch()
+        inside_layout.addWidget(self.button)
+        inside_layout.addStretch()
+        layout.addLayout(inside_layout)
+        self.setLayout(layout)
 
     def eventFilter(self, obj, event):
         if not obj.isWidgetType():
@@ -122,6 +134,8 @@ class MTabOverlay(QtWidgets.QWidget):
 
         if event.type() & (QtCore.QEvent.Resize | QtCore.QEvent.Show):
             self.setGeometry(obj.rect())
+        # elif event.type() & (QtCore.QEvent.Paint):
+        # self.setVisible(self.tab.count() != 0)
 
         return False
 
@@ -209,13 +223,13 @@ class MTabWidget(QtWidgets.QTabWidget):
         painter.end()
 
         drag.setPixmap(pixmap)
-        drag.destroyed.connect(partial(self.slot_dropped, index))
+        drag.destroyed.connect(partial(self.slot_dropped_outside, index))
         drag.start(QtCore.Qt.MoveAction)
 
     def slot_bar_press(self, bar):
         self.bar_pixmap = bar.grab(bar.tabRect(bar.currentIndex()))
 
-    def slot_dropped(self, index):
+    def slot_dropped_outside(self, index):
 
         if not self.is_new_window:
             self.is_new_window = True
@@ -234,6 +248,9 @@ class MTabWidget(QtWidgets.QTabWidget):
         self._bar_auto_hide(tab)
 
     def slot_painted(self, painter):
+        if not self.count() and not self.is_dragging:
+            painter.fillRect(self.rect(), QtCore.Qt.transparent)
+            return
 
         pos = QtGui.QCursor.pos()
         pos = self.mapFromGlobal(pos)
@@ -264,8 +281,6 @@ class MTabWidget(QtWidgets.QTabWidget):
         painter.fillRect(rect, color)
 
     def slot_border_drop(self, source, index, direction):
-
-        # DIRECTIONS = "E S W N"
 
         expanding = QtWidgets.QSizePolicy.Expanding
         self.setSizePolicy(expanding, expanding)
@@ -371,8 +386,15 @@ class MTabWidget(QtWidgets.QTabWidget):
         self._bar_auto_hide()
         self._bar_auto_hide(source)
 
+        has_tab = source.count()
+        source.overlay.repaint()
+        source.overlay.setVisible(not has_tab)
+        source.overlay.button.setVisible(not has_tab)
+
     def dragLeaveEvent(self, event):
         self.is_dragging = False
+        if not self.count():
+            self.overlay.setVisible(True)
         event.accept()
 
     def setMovable(self, value):
@@ -390,7 +412,7 @@ class MTabWidget(QtWidgets.QTabWidget):
         count = widget.count()
         is_window = widget.windowFlags() & QtCore.Qt.Window
         # TODO close tab and remove splitter
-        if not count and (is_window or self.is_in_container):
+        if not count and is_window:
             print("close")
             widget.close()
             # elif count == 1:
@@ -417,7 +439,4 @@ class MTabWidget(QtWidgets.QTabWidget):
                 widget = self.widget(index)
                 label = self.tabText(index)
                 inst.addTab(widget, label)
-
-            # self.addTab(MTextEdit(), "EMPTY")
-
         return inst
