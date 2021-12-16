@@ -10,6 +10,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+# Import built-in modules
+from functools import partial
+from functools import wraps
+
 # Import third-party modules
 from Qt import QtCore
 from Qt import QtGui
@@ -73,6 +77,14 @@ def get_scale_factor():
     scale_factor_x = QtWidgets.QApplication.desktop().logicalDpiX() / standard_dpi
     scale_factor_y = QtWidgets.QApplication.desktop().logicalDpiY() / standard_dpi
     return scale_factor_x, scale_factor_y
+
+
+def defer(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        return QtCore.QTimer.singleShot(0, partial(func, *args, **kwargs))
+
+    return wrapper
 
 
 MPixmap = MCacheDict(QtGui.QPixmap)
