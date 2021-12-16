@@ -22,6 +22,7 @@ from Qt import QtCore
 from Qt import QtGui
 from Qt import QtWidgets
 from Qt.QtCompat import isValid
+import six
 from six.moves import cPickle
 
 # Import local modules
@@ -30,6 +31,7 @@ from dayu_widgets.mixin import cursor_mixin
 from dayu_widgets.mixin import property_mixin
 from dayu_widgets.mixin import stacked_animation_mixin
 from dayu_widgets.push_button import MPushButton
+from dayu_widgets.qt import defer
 from dayu_widgets.splitter import MSplitter
 from dayu_widgets.text_edit import MTextEdit
 
@@ -101,7 +103,7 @@ class MTabBar(QtWidgets.QTabBar):
         # type: (QtWidgets.QTabBar,QtGui.QContextMenuEvent) -> None
         super(MTabBar, self).contextMenuEvent(event)
         index = self.tabAt(event.pos())
-        self.sig_tab_menu.emit(index)
+        self.sig_bar_menu.emit(index)
 
 
 class MTabOverlay(QtWidgets.QWidget):
@@ -116,7 +118,7 @@ class MTabOverlay(QtWidgets.QWidget):
         parent.installEventFilter(self)
 
         self.button = MPushButton()
-        self.button.setText(self.tr("Remove MTabWidget"))
+        self.button.setText(self.tr("Remove"))
         self.button.clicked.connect(parent.deleteLater)
         self.button.setVisible(False)
         parent.installEventFilter(self)
@@ -160,6 +162,17 @@ class SplitterRemoveFilter(QtCore.QObject):
         return super(SplitterRemoveFilter, self).eventFilter(receiver, event)
 
 
+# def draggable(flag):
+#     def decorator(func):
+#         def wrapper(self, *args, **kwargs):
+#             if self.property("draggable") == flag:
+#                 return func(self, *args, **kwargs)
+
+#         return wrapper
+
+#     return decorator
+
+
 @property_mixin
 @stacked_animation_mixin
 class MTabWidget(QtWidgets.QTabWidget):
@@ -173,6 +186,16 @@ class MTabWidget(QtWidgets.QTabWidget):
 
     def __init__(self, parent=None):
         super(MTabWidget, self).__init__(parent=parent)
+
+        self.signal_list = []
+        self.method_list = []
+        meta = self.metaObject()
+        for i in range(meta.methodCount()):
+            method = meta.method(i)
+            method_name = method.name()
+            self.method_list.append(method_name)
+            if method.methodType() == QtCore.QMetaMethod.Signal:
+                self.signal_list.append(method_name)
 
         self.bar = MTabBar(self)
         self.setTabBar(self.bar)
@@ -197,6 +220,8 @@ class MTabWidget(QtWidgets.QTabWidget):
         self.on_border_index = -1
         self.on_tab_index = -1
         self.rect_data = defaultdict(dict)
+
+        self._validate_tab_count()
 
     def _set_draggable(self, value):
         self.setAcceptDrops(value)
@@ -259,9 +284,6 @@ class MTabWidget(QtWidgets.QTabWidget):
         tab.raise_()
         tab.setFocus()
 
-        self._bar_auto_hide()
-        self._bar_auto_hide(tab)
-
     def slot_painted(self, painter):
         if not self.count() and not self.is_dragging:
             painter.fillRect(self.rect(), QtCore.Qt.transparent)
@@ -291,7 +313,8 @@ class MTabWidget(QtWidgets.QTabWidget):
                     break
 
             rect_widget = self.rect_data["rect_widget"]
-            painter.fillRect(rect_widget, color)
+            if isinstance(rect_widget, QtCore.QRect):
+                painter.fillRect(rect_widget, color)
 
         painter.fillRect(rect, color)
 
@@ -308,6 +331,8 @@ class MTabWidget(QtWidgets.QTabWidget):
         parent = self.parent()
         label = source.tabText(index)
         widget = source.widget(index)
+        if not widget or not label:
+            return
         inst = self.copy()
         inst.is_in_container = True
         inst.addTab(widget, label)
@@ -383,6 +408,8 @@ class MTabWidget(QtWidgets.QTabWidget):
             event.accept()
 
     def dropEvent(self, event):
+        super(MTabWidget, self).dropEvent(event)
+
         self.is_dragging = False
         buff = self._get_drag_data(event)
         index = cPickle.loads(buff)
@@ -399,17 +426,34 @@ class MTabWidget(QtWidgets.QTabWidget):
             self.sig_tab_drop.emit(self.on_tab_index)
         elif self.on_border_index >= 0:
             self.sig_border_drop.emit(source, index, self.on_border_index)
-        self._bar_auto_hide()
-        self._bar_auto_hide(source)
+        self._validate_tab_count()
 
     def dragLeaveEvent(self, event):
+        super(MTabWidget, self).dragLeaveEvent(event)
         self.is_dragging = False
         if not self.count():
             self.overlay.setVisible(True)
         event.accept()
 
-    def setMovable(self, value):
-        self.bar.setMovable(value)
+    def tabRemoved(self, *args):
+        self._validate_tab_count()
+        return super(MTabWidget, self).tabRemoved(*args)
+
+    @defer
+    def _validate_tab_count(self):
+        count = self.count()
+        is_window = self.windowFlags() & QtCore.Qt.Window
+        if not count and is_window:
+            self.close()
+        if self.property("draggable"):
+            self.overlay.repaint()
+            self.overlay.setVisible(not count)
+            self.overlay.button.setVisible(not count)
+
+            # if count == 1:
+            #     self.bar.setVisible(False)
+            # elif not self.bar.isVisible():
+            #     self.bar.setVisible(True)
 
     def _get_drag_data(self, event):
         data = event.mimeData()
@@ -418,28 +462,12 @@ class MTabWidget(QtWidgets.QTabWidget):
             return event.ignore()
         return buff
 
-    def _bar_auto_hide(self, widget=None):
-        widget = widget or self
-        count = widget.count()
-        is_window = widget.windowFlags() == QtCore.Qt.Window
-        # TODO close tab and remove splitter
-        if not count and is_window:
-            widget.close()
-            # elif count == 1:
-            #     widget.bar.setVisible(False)
-            # elif not widget.bar.isVisible():
-            #     widget.bar.setVisible(True)
-
-        has_tab = widget.count()
-        widget.overlay.repaint()
-        widget.overlay.setVisible(not has_tab)
-        widget.overlay.button.setVisible(not has_tab)
-
     def copy(self, tab=False):
         inst = MTabWidget(self.window())
         meta = self.metaObject()
         props = [bytes(p).decode("utf-8") for p in self.dynamicPropertyNames()]
         props += [meta.property(i).name() for i in range(meta.propertyCount())]
+        props.remove("objectName")
 
         for prop_name in props:
             if prop_name.startswith("_"):
@@ -453,4 +481,29 @@ class MTabWidget(QtWidgets.QTabWidget):
                 widget = self.widget(index)
                 label = self.tabText(index)
                 inst.addTab(widget, label)
+
+            # NOTES(timmyliang): singal connections
+            for signal_name in self.signal_list:
+                signal_name = bytes(signal_name).decode("utf-8")
+                src_signal = getattr(self, signal_name)
+                dst_signal = getattr(inst, signal_name)
+                dst_signal.connect(src_signal.emit)
+
+            self.setProperty("draggable", False)
+            # # TODO all method to inst
+            # for index,(name,member) in enumerate(inspect.getmembers(self,inspect.isroutine)):
+            #     if name.startswith("_") or index > 100:
+            #         continue
+            #     if "event" in name.lower():
+            #         continue
+            #     print(name)
+            #     setattr(self, name,getattr(inst, name))
+
+            # TODO(timmyliang): specific method replace works
+            for name in ["tabText", "removeTab"]:
+                setattr(self, name, getattr(inst, name))
+
+            # for n,m in inst.__dict__.items():
+            #     self.__dict__[n] = m
+
         return inst

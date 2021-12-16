@@ -14,6 +14,8 @@ from __future__ import print_function
 import contextlib
 import signal
 import sys
+from functools import partial
+from functools import wraps
 
 # Import third-party modules
 from Qt import QtCore
@@ -91,6 +93,14 @@ def application(*args):
         app.exec_()
     else:
         yield app
+
+
+def defer(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        return QtCore.QTimer.singleShot(0, partial(func, *args, **kwargs))
+
+    return wrapper
 
 
 MPixmap = MCacheDict(QtGui.QPixmap)

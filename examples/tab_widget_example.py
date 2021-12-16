@@ -18,6 +18,7 @@ from Qt import QtWidgets
 from dayu_widgets.divider import MDivider
 from dayu_widgets.label import MLabel
 from dayu_widgets.message import MMessage
+from dayu_widgets.splitter import MSplitter
 from dayu_widgets.tab_widget import MTabWidget
 from dayu_widgets.text_edit import MTextEdit
 
@@ -34,7 +35,8 @@ class MTabWidgetTest(QtWidgets.QWidget):
         return edit
 
     def _init_ui(self):
-        main_lay = QtWidgets.QVBoxLayout()
+        layout = QtWidgets.QVBoxLayout()
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
 
         tab_card = MTabWidget()
         tab_card.addTab(MLabel("test 1"), "Current Element")
@@ -50,25 +52,41 @@ class MTabWidgetTest(QtWidgets.QWidget):
         self.tab_closable.tabCloseRequested.connect(self.slot_close_tab)
         self.tab_closable.setProperty("draggable", True)
 
-        self.tab_draggable = MTabWidget()
-        self.tab_draggable.setProperty("movable", True)
-        self.tab_draggable.setProperty("draggable", True)
-        self.tab_draggable.addTab(self.get_text_edit("Draggable test 1"), "标签一")
-        self.tab_draggable.addTab(self.get_text_edit("Draggable test 2"), "标签二")
-        self.tab_draggable.addTab(self.get_text_edit("Draggable test 3"), "标签三")
+        tab_draggable = MTabWidget()
+        tab_draggable.setObjectName("draggable")
+        tab_draggable.setProperty("movable", True)
+        tab_draggable.setProperty("draggable", True)
+        tab_draggable.addTab(self.get_text_edit("Draggable 1"), "拖拽一")
+        tab_draggable.addTab(self.get_text_edit("Draggable 2"), "拖拽二")
+        tab_draggable.addTab(self.get_text_edit("Draggable 3"), "拖拽三")
 
-        main_lay.addWidget(MDivider("Normal"))
-        main_lay.addWidget(tab_card)
-        main_lay.addWidget(MDivider("Closable"))
-        main_lay.addWidget(self.tab_closable)
-        main_lay.addWidget(MDivider("Draggable"))
-        main_lay.addWidget(self.tab_draggable)
-        self.setLayout(main_lay)
+        tab_container = QtWidgets.QWidget()
+        tab_layout = QtWidgets.QVBoxLayout(tab_container)
+        tab_layout.addWidget(MDivider("Normal"))
+        tab_layout.addWidget(tab_card)
+        splitter.addWidget(tab_container)
+
+        tab_container = QtWidgets.QWidget()
+        tab_layout = QtWidgets.QVBoxLayout(tab_container)
+        tab_layout.addWidget(MDivider("Draggable"))
+        tab_layout.addWidget(tab_draggable)
+        splitter.addWidget(tab_container)
+
+        tab_container = QtWidgets.QWidget()
+        tab_layout = QtWidgets.QVBoxLayout(tab_container)
+        tab_layout.addWidget(MDivider("Closable"))
+        tab_layout.addWidget(self.tab_closable)
+        splitter.addWidget(tab_container)
+
+        layout.addWidget(splitter)
+        self.setLayout(layout)
 
     @QtCore.Slot(int)
     def slot_close_tab(self, index):
         if index > 0:
+            print(1)
             text = self.tab_closable.tabText(index)
+            print(self.tab_closable.count, index)
             self.tab_closable.removeTab(index)
             MMessage.info("成功关闭一个标签: {}".format(text), closable=True, parent=self)
         else:
