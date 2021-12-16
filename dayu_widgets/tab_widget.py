@@ -21,6 +21,7 @@ from functools import partial
 from Qt import QtCore
 from Qt import QtGui
 from Qt import QtWidgets
+from Qt.QtCompat import isValid
 from six.moves import cPickle
 
 # Import local modules
@@ -115,7 +116,7 @@ class MTabOverlay(QtWidgets.QWidget):
         parent.installEventFilter(self)
 
         self.button = MPushButton()
-        self.button.setText(self.tr("remove pannel"))
+        self.button.setText(self.tr("Remove MTabWidget"))
         self.button.clicked.connect(parent.deleteLater)
         self.button.setVisible(False)
         parent.installEventFilter(self)
@@ -129,21 +130,34 @@ class MTabOverlay(QtWidgets.QWidget):
         self.setLayout(layout)
 
     def eventFilter(self, obj, event):
-        if not obj.isWidgetType():
-            return False
-
         if event.type() & (QtCore.QEvent.Resize | QtCore.QEvent.Show):
             self.setGeometry(obj.rect())
-        # elif event.type() & (QtCore.QEvent.Paint):
-        # self.setVisible(self.tab.count() != 0)
-
         return False
 
     def paintEvent(self, event):
-
         painter = QtGui.QPainter(self)
         self.sig_painted.emit(painter)
         super(MTabOverlay, self).paintEvent(event)
+
+
+class SplitterRemoveFilter(QtCore.QObject):
+    def __init__(self, parent):
+        super(SplitterRemoveFilter, self).__init__(parent)
+        self.target = parent
+        parent.destroyed.connect(self.deleteLater)
+        parent.installEventFilter(self)
+
+    def eventFilter(self, receiver, event):
+        typ = event.type()
+        if typ in [QtCore.QEvent.ChildRemoved]:
+            if isValid(self.target) and not self.target.count():
+                parent = self.target.parent()
+                if isinstance(parent, MTabWidget) and not parent.count():
+                    parent.setParent(None)
+                else:
+                    self.target.setParent(None)
+
+        return super(SplitterRemoveFilter, self).eventFilter(receiver, event)
 
 
 @property_mixin
@@ -173,7 +187,7 @@ class MTabWidget(QtWidgets.QTabWidget):
 
         self.setMovable(True)
         self.setProperty("hint_size", 5)
-        self.setProperty("draggable", True)
+        self.setProperty("draggable", False)
         self.setProperty("hint_opacity", 0.5)
         self.setProperty("hint_color", dayu_theme.blue)
 
@@ -245,6 +259,7 @@ class MTabWidget(QtWidgets.QTabWidget):
         tab.raise_()
         tab.setFocus()
 
+        self._bar_auto_hide()
         self._bar_auto_hide(tab)
 
     def slot_painted(self, painter):
@@ -289,7 +304,7 @@ class MTabWidget(QtWidgets.QTabWidget):
 
         orient = QtCore.Qt.Vertical if direction in [1, 3] else QtCore.Qt.Horizontal
         is_after = direction in [2, 3]
-        # TODO if splitter already exists not to create new one
+
         parent = self.parent()
         label = source.tabText(index)
         widget = source.widget(index)
@@ -308,6 +323,7 @@ class MTabWidget(QtWidgets.QTabWidget):
         this.is_in_container = True
 
         self.splitter = QtWidgets.QSplitter()
+        SplitterRemoveFilter(self.splitter)
         layout = QtWidgets.QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.splitter)
@@ -386,11 +402,6 @@ class MTabWidget(QtWidgets.QTabWidget):
         self._bar_auto_hide()
         self._bar_auto_hide(source)
 
-        has_tab = source.count()
-        source.overlay.repaint()
-        source.overlay.setVisible(not has_tab)
-        source.overlay.button.setVisible(not has_tab)
-
     def dragLeaveEvent(self, event):
         self.is_dragging = False
         if not self.count():
@@ -410,19 +421,22 @@ class MTabWidget(QtWidgets.QTabWidget):
     def _bar_auto_hide(self, widget=None):
         widget = widget or self
         count = widget.count()
-        is_window = widget.windowFlags() & QtCore.Qt.Window
+        is_window = widget.windowFlags() == QtCore.Qt.Window
         # TODO close tab and remove splitter
         if not count and is_window:
-            print("close")
             widget.close()
             # elif count == 1:
             #     widget.bar.setVisible(False)
             # elif not widget.bar.isVisible():
             #     widget.bar.setVisible(True)
 
-    def copy(self, tab=False):
-        inst = MTabWidget(self)
+        has_tab = widget.count()
+        widget.overlay.repaint()
+        widget.overlay.setVisible(not has_tab)
+        widget.overlay.button.setVisible(not has_tab)
 
+    def copy(self, tab=False):
+        inst = MTabWidget(self.window())
         meta = self.metaObject()
         props = [bytes(p).decode("utf-8") for p in self.dynamicPropertyNames()]
         props += [meta.property(i).name() for i in range(meta.propertyCount())]
