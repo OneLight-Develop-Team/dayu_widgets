@@ -18,6 +18,7 @@ from __future__ import print_function
 from Qt import QtCore
 from Qt import QtGui
 from Qt import QtWidgets
+from Qt.QtCompat import isValid
 
 
 def property_mixin(cls):
@@ -45,36 +46,30 @@ def cursor_mixin(cls):
     when widget is disabled and mouse in: Qt.ForbiddenCursor
     """
 
-    old_enter_event = cls.enterEvent
-    old_leave_event = cls.leaveEvent
+    def _new_event(self, event):
+        typ = event.type()
+        # print(typ)
+        if typ in [QtCore.QEvent.Enter]:
+            if not self.__dict__.get("__dayu_enter", False):
+                self.__dict__.update({"__dayu_enter": True})
+                QtWidgets.QApplication.setOverrideCursor(
+                    QtCore.Qt.PointingHandCursor
+                    if self.isEnabled()
+                    else QtCore.Qt.ForbiddenCursor
+                )
+        elif typ in [
+            QtCore.QEvent.Hide,
+            QtCore.QEvent.Leave,
+            QtCore.QEvent.ChildAdded,
+            QtCore.QEvent.ChildRemoved,
+        ]:
+            if self.__dict__.get("__dayu_enter", False):
+                QtWidgets.QApplication.restoreOverrideCursor()
+                self.__dict__.update({"__dayu_enter": False})
 
-    def _new_enter_event(self, *args, **kwargs):
-        old_enter_event(self, *args, **kwargs)
-        self.__dict__.update({"__dayu_enter": True})
-        QtWidgets.QApplication.setOverrideCursor(
-            QtCore.Qt.PointingHandCursor
-            if self.isEnabled()
-            else QtCore.Qt.ForbiddenCursor
-        )
-        return super(cls, self).enterEvent(*args, **kwargs)
+        return super(cls, self).event(event)
 
-    def _new_leave_event(self, *args, **kwargs):
-        old_leave_event(self, *args, **kwargs)
-        if self.__dict__.get("__dayu_enter", False):
-            QtWidgets.QApplication.restoreOverrideCursor()
-            self.__dict__.update({"__dayu_enter": False})
-        return super(cls, self).leaveEvent(*args, **kwargs)
-
-    def _new_hide_event(self, *args, **kwargs):
-        old_leave_event(self, *args, **kwargs)
-        if self.__dict__.get("__dayu_enter", False):
-            QtWidgets.QApplication.restoreOverrideCursor()
-            self.__dict__.update({"__dayu_enter": False})
-        return super(cls, self).hideEvent(*args, **kwargs)
-
-    setattr(cls, "enterEvent", _new_enter_event)
-    setattr(cls, "leaveEvent", _new_leave_event)
-    setattr(cls, "hideEvent", _new_hide_event)
+    setattr(cls, "event", _new_event)
     return cls
 
 
@@ -210,7 +205,7 @@ def stacked_animation_mixin(cls):
         condition = not current_widget
         condition |= self._to_show_pos_ani.state() == QtCore.QPropertyAnimation.Running
         condition |= self._to_hide_pos_ani.state() == QtCore.QPropertyAnimation.Running
-        if condition:
+        if condition or not isValid(self._opacity_eff):
             return
 
         if self._previous_index < index:
