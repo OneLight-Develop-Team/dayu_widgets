@@ -29,11 +29,6 @@ class MTabWidgetTest(QtWidgets.QWidget):
         self._init_ui()
         self.resize(500, 500)
 
-    def get_text_edit(self, text):
-        edit = MTextEdit()
-        edit.setText(text)
-        return edit
-
     def _init_ui(self):
         layout = QtWidgets.QVBoxLayout()
         splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
@@ -54,11 +49,10 @@ class MTabWidgetTest(QtWidgets.QWidget):
 
         tab_draggable = MTabWidget()
         tab_draggable.setObjectName("draggable")
-        tab_draggable.setProperty("movable", True)
         tab_draggable.setProperty("draggable", True)
-        tab_draggable.addTab(self.get_text_edit("Draggable 1"), "拖拽一")
-        tab_draggable.addTab(self.get_text_edit("Draggable 2"), "拖拽二")
-        tab_draggable.addTab(self.get_text_edit("Draggable 3"), "拖拽三")
+        tab_draggable.addTab(MTextEdit("Draggable 1"), "拖拽一")
+        tab_draggable.addTab(MTextEdit("Draggable 2"), "拖拽二")
+        tab_draggable.addTab(MTextEdit("Draggable 3"), "拖拽三")
 
         tab_container = QtWidgets.QWidget()
         tab_layout = QtWidgets.QVBoxLayout(tab_container)

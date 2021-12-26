@@ -22,18 +22,49 @@ from Qt import QtCore
 from Qt import QtGui
 from Qt import QtWidgets
 from Qt.QtCompat import isValid
-import six
 from six.moves import cPickle
 
 # Import local modules
 from dayu_widgets import dayu_theme
+from dayu_widgets.line_edit import MLineEdit
+from dayu_widgets.mixin import copy_mixin
 from dayu_widgets.mixin import cursor_mixin
 from dayu_widgets.mixin import property_mixin
 from dayu_widgets.mixin import stacked_animation_mixin
 from dayu_widgets.push_button import MPushButton
 from dayu_widgets.qt import defer
-from dayu_widgets.splitter import MSplitter
-from dayu_widgets.text_edit import MTextEdit
+from dayu_widgets.qt import is_signal_connected
+
+
+class MTabEdit(MLineEdit):
+    def __init__(self, text, parent):
+        super(MTabEdit, self).__init__(text, parent)
+        self.bar = parent
+        self.editingFinished.connect(self.slot_edit_finish)
+        app = QtWidgets.QApplication.instance()
+        app.installEventFilter(self)
+
+    def eventFilter(self, receiver, event):
+        if event.type() == QtCore.QEvent.MouseButtonPress:
+            is_window = receiver.__class__.__name__ == "QWindow"
+            if not is_window and receiver is not self:
+                self.slot_edit_finish()
+        return super(MTabEdit, self).eventFilter(receiver, event)
+
+    def slot_edit_finish(self):
+        text = self.text()
+        index = self.bar.currentIndex()
+        tab_widget = self.bar.parent()
+        if isinstance(text, MTabWidget):
+            widget = tab_widget.widget(index)
+            widget.setWindowTitle(text)
+        self.bar.setTabText(index, text)
+        self.deleteLater()
+
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key_Escape:
+            self.deleteLater()
+        return super(MTabEdit, self).keyPressEvent(event)
 
 
 @cursor_mixin
@@ -43,40 +74,49 @@ class MTabBar(QtWidgets.QTabBar):
     sig_bar_press = QtCore.Signal(QtWidgets.QTabBar)
     sig_bar_menu = QtCore.Signal(int)
 
-    def __init__(self, parent=None):
-        super(MTabBar, self).__init__(parent)
-        self.dragging = False
+    def __init__(self, *args, **kwargs):
+        super(MTabBar, self).__init__(*args, **kwargs)
+        self.is_dragging = False
 
-        # self.setAcceptDrops(True)
         self.setProperty("draggable", True)
+        self.setProperty("renameable", True)
         self.setDrawBase(False)
         self.setMouseTracking(True)
 
+        self.tabBarDoubleClicked.connect(self.rename_tab)
+
+    def rename_tab(self, index):
+        if not self.property("renameable"):
+            return
+
+        tab_text = self.tabText(index)
+        edit = MTabEdit(tab_text, self)
+        edit.setParent(self)
+        rect = self.tabRect(index)
+        edit.setGeometry(rect)
+        edit.show()
+        edit.setFocus()
+
     def tabSizeHint(self, index):
         tab_text = self.tabText(index)
-        if self.tabsClosable():
-            return QtCore.QSize(
-                self.fontMetrics().width(tab_text) + 70,
-                self.fontMetrics().height() + 20,
-            )
-        else:
-            return QtCore.QSize(
-                self.fontMetrics().width(tab_text) + 50,
-                self.fontMetrics().height() + 20,
-            )
+        offset = 70 if self.tabsClosable() else 50
+        return QtCore.QSize(
+            self.fontMetrics().width(tab_text) + offset,
+            self.fontMetrics().height() + 20,
+        )
 
     def mousePressEvent(self, event):
         # type: (QtWidgets.QTabBar,QtGui.QMousePressEvent) -> None
         super(MTabBar, self).mousePressEvent(event)
         if event.buttons() == QtCore.Qt.LeftButton:
-            self.dragging = True
+            self.is_dragging = True
             self.sig_bar_press.emit(self)
 
     def mouseMoveEvent(self, event):
         # type: (QtWidgets.QTabBar,QtGui.QMouseMoveEvent) -> None
         super(MTabBar, self).mouseMoveEvent(event)
         index = self.currentIndex()
-        condition = self.dragging
+        condition = self.is_dragging
         condition &= event.buttons() == QtCore.Qt.LeftButton
         condition &= bool(self.count())
         condition &= index != -1
@@ -90,14 +130,14 @@ class MTabBar(QtWidgets.QTabBar):
     def mouseReleaseEvent(self, event):
         # type: (QtWidgets.QTabBar,QtGui.QMouseReleaseEvent) -> None
         super(MTabBar, self).mouseReleaseEvent(event)
-        if self.dragging and event.buttons() == QtCore.Qt.LeftButton:
-            self.dragging = False
+        if self.is_dragging and event.buttons() == QtCore.Qt.LeftButton:
+            self.is_dragging = False
 
     def focusOutEvent(self, event):
         # type: (QtWidgets.QTabBar,QtGui.QFocusOutEvent) -> None
         super(MTabBar, self).focusOutEvent(event)
-        if self.dragging:
-            self.dragging = False
+        if self.is_dragging:
+            self.is_dragging = False
 
     def contextMenuEvent(self, event):
         # type: (QtWidgets.QTabBar,QtGui.QContextMenuEvent) -> None
@@ -162,17 +202,7 @@ class SplitterRemoveFilter(QtCore.QObject):
         return super(SplitterRemoveFilter, self).eventFilter(receiver, event)
 
 
-# def draggable(flag):
-#     def decorator(func):
-#         def wrapper(self, *args, **kwargs):
-#             if self.property("draggable") == flag:
-#                 return func(self, *args, **kwargs)
-
-#         return wrapper
-
-#     return decorator
-
-
+@copy_mixin
 @property_mixin
 @stacked_animation_mixin
 class MTabWidget(QtWidgets.QTabWidget):
@@ -187,16 +217,6 @@ class MTabWidget(QtWidgets.QTabWidget):
     def __init__(self, parent=None):
         super(MTabWidget, self).__init__(parent=parent)
 
-        self.signal_list = []
-        self.method_list = []
-        meta = self.metaObject()
-        for i in range(meta.methodCount()):
-            method = meta.method(i)
-            method_name = method.name()
-            self.method_list.append(method_name)
-            if method.methodType() == QtCore.QMetaMethod.Signal:
-                self.signal_list.append(method_name)
-
         self.bar = MTabBar(self)
         self.setTabBar(self.bar)
         self.bar.sig_start_drag.connect(self.slot_drag_tab)
@@ -206,13 +226,12 @@ class MTabWidget(QtWidgets.QTabWidget):
         self.overlay = MTabOverlay(self)
         self.overlay.sig_painted.connect(self.slot_painted)
 
-        self.sig_border_drop.connect(self.slot_border_drop)
-
         self.setMovable(True)
         self.setProperty("hint_size", 5)
-        self.setProperty("draggable", False)
         self.setProperty("hint_opacity", 0.5)
         self.setProperty("hint_color", dayu_theme.blue)
+        self.setProperty("draggable", False)
+        self.setProperty("renameable", False)
 
         self.is_in_container = False
         self.is_new_window = True
@@ -226,6 +245,9 @@ class MTabWidget(QtWidgets.QTabWidget):
     def _set_draggable(self, value):
         self.setAcceptDrops(value)
         self.bar.setProperty("draggable", value)
+
+    def _set_renameable(self, value):
+        self.bar.setProperty("renameable", value)
 
     @property
     def is_dragging(self):
@@ -278,6 +300,8 @@ class MTabWidget(QtWidgets.QTabWidget):
         label = self.tabText(index)
         tab = self.copy()
         tab.setWindowFlags(QtCore.Qt.Window)
+        tab.setWindowTitle(label)
+        widget.setWindowTitle(label)
         tab.addTab(widget, label)
         tab.show()
         tab.move(QtGui.QCursor.pos())
@@ -300,12 +324,13 @@ class MTabWidget(QtWidgets.QTabWidget):
         self.on_border_index = -1
         self.on_tab_index = -1
 
-        for index, rect in enumerate(self.rect_data.get("border", [])):
+        is_connected = is_signal_connected(self, "sig_border_drop")
+        border_rect_list = self.rect_data["border"] if is_connected else []
+        for index, rect in enumerate(border_rect_list):
             if rect.contains(pos):
                 self.on_border_index = index
                 break
         else:
-
             rect_tab = self.rect_data.get("rect_tab", {})
             for index, (_rect, rect) in enumerate(rect_tab.items()):
                 if _rect.contains(pos):
@@ -317,47 +342,6 @@ class MTabWidget(QtWidgets.QTabWidget):
                 painter.fillRect(rect_widget, color)
 
         painter.fillRect(rect, color)
-
-    def slot_border_drop(self, source, index, direction):
-
-        expanding = QtWidgets.QSizePolicy.Expanding
-        self.setSizePolicy(expanding, expanding)
-        self.setMinimumHeight(150)
-        self.is_in_container = False
-
-        orient = QtCore.Qt.Vertical if direction in [1, 3] else QtCore.Qt.Horizontal
-        is_after = direction in [2, 3]
-
-        parent = self.parent()
-        label = source.tabText(index)
-        widget = source.widget(index)
-        if not widget or not label:
-            return
-        inst = self.copy()
-        inst.is_in_container = True
-        inst.addTab(widget, label)
-        if isinstance(parent, QtWidgets.QSplitter):
-            self.splitter = parent
-            if orient == self.splitter.orientation():
-                splitter_index = self.splitter.indexOf(self)
-                splitter_index = splitter_index if is_after else splitter_index + 1
-                self.splitter.insertWidget(splitter_index, inst)
-                return
-
-        this = self.copy(True)
-        this.is_in_container = True
-
-        self.splitter = QtWidgets.QSplitter()
-        SplitterRemoveFilter(self.splitter)
-        layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.splitter)
-        self.setLayout(layout)
-        widget_list = [inst, this] if is_after else [this, inst]
-        for w in widget_list:
-            self.splitter.addWidget(w)
-
-        self.splitter.setOrientation(orient)
 
     def dragEnterEvent(self, event):
         super(MTabWidget, self).dragEnterEvent(event)
@@ -461,49 +445,3 @@ class MTabWidget(QtWidgets.QTabWidget):
         if not buff:
             return event.ignore()
         return buff
-
-    def copy(self, tab=False):
-        inst = MTabWidget(self.window())
-        meta = self.metaObject()
-        props = [bytes(p).decode("utf-8") for p in self.dynamicPropertyNames()]
-        props += [meta.property(i).name() for i in range(meta.propertyCount())]
-        props.remove("objectName")
-
-        for prop_name in props:
-            if prop_name.startswith("_"):
-                continue
-            val = self.property(prop_name)
-            if val is not None:
-                inst.setProperty(prop_name, val)
-
-        if tab:
-            for index in range(self.count())[::-1]:
-                widget = self.widget(index)
-                label = self.tabText(index)
-                inst.addTab(widget, label)
-
-            # NOTES(timmyliang): singal connections
-            for signal_name in self.signal_list:
-                signal_name = bytes(signal_name).decode("utf-8")
-                src_signal = getattr(self, signal_name)
-                dst_signal = getattr(inst, signal_name)
-                dst_signal.connect(src_signal.emit)
-
-            self.setProperty("draggable", False)
-            # # TODO all method to inst
-            # for index,(name,member) in enumerate(inspect.getmembers(self,inspect.isroutine)):
-            #     if name.startswith("_") or index > 100:
-            #         continue
-            #     if "event" in name.lower():
-            #         continue
-            #     print(name)
-            #     setattr(self, name,getattr(inst, name))
-
-            # TODO(timmyliang): specific method replace works
-            for name in ["tabText", "removeTab"]:
-                setattr(self, name, getattr(inst, name))
-
-            # for n,m in inst.__dict__.items():
-            #     self.__dict__[n] = m
-
-        return inst
