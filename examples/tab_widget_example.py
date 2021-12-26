@@ -78,9 +78,7 @@ class MTabWidgetTest(QtWidgets.QWidget):
     @QtCore.Slot(int)
     def slot_close_tab(self, index):
         if index > 0:
-            print(1)
             text = self.tab_closable.tabText(index)
-            print(self.tab_closable.count, index)
             self.tab_closable.removeTab(index)
             MMessage.info("成功关闭一个标签: {}".format(text), closable=True, parent=self)
         else:
