@@ -50,8 +50,8 @@ def cursor_mixin(cls):
         typ = event.type()
         # print(typ)
         if typ in [QtCore.QEvent.Enter]:
-            if not self.__dict__.get("__dayu_enter", False):
-                self.__dict__.update({"__dayu_enter": True})
+            if not self.__dict__.get("_dayu_enter", False):
+                self.__dict__.update({"_dayu_enter": True})
                 QtWidgets.QApplication.setOverrideCursor(
                     QtCore.Qt.PointingHandCursor
                     if self.isEnabled()
@@ -62,10 +62,11 @@ def cursor_mixin(cls):
             QtCore.QEvent.Leave,
             QtCore.QEvent.ChildAdded,
             QtCore.QEvent.ChildRemoved,
+            QtCore.QEvent.MouseButtonRelease,
         ]:
-            if self.__dict__.get("__dayu_enter", False):
+            if self.__dict__.get("_dayu_enter", True):
                 QtWidgets.QApplication.restoreOverrideCursor()
-                self.__dict__.update({"__dayu_enter": False})
+                self.__dict__.update({"_dayu_enter": False})
 
         return super(cls, self).event(event)
 
