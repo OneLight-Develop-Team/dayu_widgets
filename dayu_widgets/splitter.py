@@ -25,9 +25,10 @@ from dayu_widgets.mixin import property_mixin
 
 @property_mixin
 class MSplitter(QtWidgets.QSplitter):
-    def __init__(self, Orientation=QtCore.Qt.Horizontal, parent=None):
-        super(MSplitter, self).__init__(Orientation, parent=parent)
+    def __init__(self, *args, **kwargs):
+        super(MSplitter, self).__init__(*args, **kwargs)
         self.setHandleWidth(10)
+        self.setProperty("add_button", True)
         self.setProperty("animatable", True)
         self.setProperty("default_size", 100)
         self.setProperty("anim_move_duration", 300)
@@ -71,6 +72,8 @@ class MSplitter(QtWidgets.QSplitter):
             self.setSizes(size_list)
 
     def createHandle(self):
+        if not self.property("add_button"):
+            return super(MSplitter, self).createHandle()
         count = self.count()
 
         orient = self.orientation()

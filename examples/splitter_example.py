@@ -28,6 +28,7 @@ class SplitterExample(QtWidgets.QWidget):
         super(SplitterExample, self).__init__(parent)
 
         main_splitter = MSplitter(QtCore.Qt.Vertical)
+        main_splitter.setProperty("animatable", False)
         main_splitter.setHandleWidth(20)
 
         container = QtWidgets.QWidget()
@@ -44,6 +45,7 @@ class SplitterExample(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout()
         container.setLayout(layout)
         splitter = MSplitter()
+        splitter.setProperty("add_button", False)
         splitter.addWidget(MTextEdit())
         splitter.addWidget(MTextEdit())
         splitter.addWidget(MTextEdit())
