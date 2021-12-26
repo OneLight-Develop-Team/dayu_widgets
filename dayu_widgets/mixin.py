@@ -234,3 +234,24 @@ def stacked_animation_mixin(cls):
     setattr(cls, "_set_animatable", _set_animatable)
     setattr(cls, "_disable_opacity", _disable_opacity)
     return cls
+
+
+def copy_mixin(cls):
+    def _copy(self):
+        inst = self.__class__(self.window())
+        meta = self.metaObject()
+        props = [bytes(p).decode("utf-8") for p in self.dynamicPropertyNames()]
+        props += [meta.property(i).name() for i in range(meta.propertyCount())]
+        props.remove("objectName")
+
+        for prop_name in props:
+            if prop_name.startswith("_"):
+                continue
+            val = self.property(prop_name)
+            if val is not None:
+                inst.setProperty(prop_name, val)
+
+        return inst
+
+    setattr(cls, "copy", _copy)
+    return cls
