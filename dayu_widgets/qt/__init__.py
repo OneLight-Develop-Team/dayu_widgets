@@ -12,10 +12,10 @@ from __future__ import print_function
 
 # Import built-in modules
 import contextlib
-import signal
-import sys
 from functools import partial
 from functools import wraps
+import signal
+import sys
 
 # Import third-party modules
 from Qt import QtCore
@@ -101,6 +101,15 @@ def defer(func):
         return QtCore.QTimer.singleShot(0, partial(func, *args, **kwargs))
 
     return wrapper
+
+
+def is_signal_connected(obj, name):
+    meta = obj.metaObject()
+    for i in range(meta.methodCount()):
+        method = meta.method(i)
+        if method.name() == name:
+            return obj.isSignalConnected(method)
+    return False
 
 
 MPixmap = MCacheDict(QtGui.QPixmap)
