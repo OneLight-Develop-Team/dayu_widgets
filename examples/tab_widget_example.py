@@ -18,7 +18,7 @@ from Qt import QtWidgets
 from dayu_widgets.divider import MDivider
 from dayu_widgets.label import MLabel
 from dayu_widgets.message import MMessage
-from dayu_widgets.splitter import MSplitter
+from dayu_widgets.tab_widget import MDraggableTabWidget
 from dayu_widgets.tab_widget import MTabWidget
 from dayu_widgets.text_edit import MTextEdit
 
@@ -27,7 +27,7 @@ class MTabWidgetTest(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(MTabWidgetTest, self).__init__(parent)
         self._init_ui()
-        self.resize(500, 500)
+        self.resize(1000, 800)
 
     def _init_ui(self):
         layout = QtWidgets.QVBoxLayout()
@@ -47,12 +47,15 @@ class MTabWidgetTest(QtWidgets.QWidget):
         self.tab_closable.tabCloseRequested.connect(self.slot_close_tab)
         self.tab_closable.setProperty("draggable", True)
 
-        tab_draggable = MTabWidget()
-        tab_draggable.setObjectName("draggable")
-        tab_draggable.setProperty("draggable", True)
-        tab_draggable.addTab(MTextEdit("Draggable 1"), "拖拽一")
-        tab_draggable.addTab(MTextEdit("Draggable 2"), "拖拽二")
-        tab_draggable.addTab(MTextEdit("Draggable 3"), "拖拽三")
+        draggable_layout = QtWidgets.QHBoxLayout()
+        for num in range(1, 4):
+            tab_draggable = MDraggableTabWidget()
+            tab_draggable.setObjectName("draggable")
+            tab_draggable.setProperty("draggable", True)
+            for index in range(1, 4):
+                index = "(%s, %s)" % (num, index)
+                tab_draggable.addTab(MTextEdit("Draggable %s" % index), index)
+            draggable_layout.addWidget(tab_draggable)
 
         tab_container = QtWidgets.QWidget()
         tab_layout = QtWidgets.QVBoxLayout(tab_container)
@@ -63,7 +66,7 @@ class MTabWidgetTest(QtWidgets.QWidget):
         tab_container = QtWidgets.QWidget()
         tab_layout = QtWidgets.QVBoxLayout(tab_container)
         tab_layout.addWidget(MDivider("Draggable"))
-        tab_layout.addWidget(tab_draggable)
+        tab_layout.addLayout(draggable_layout)
         splitter.addWidget(tab_container)
 
         tab_container = QtWidgets.QWidget()

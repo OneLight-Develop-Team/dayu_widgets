@@ -21,13 +21,11 @@ from functools import partial
 from Qt import QtCore
 from Qt import QtGui
 from Qt import QtWidgets
-from Qt.QtCompat import isValid
 from six.moves import cPickle
 
 # Import local modules
 from dayu_widgets import dayu_theme
 from dayu_widgets.line_edit import MLineEdit
-from dayu_widgets.menu import MMenu
 from dayu_widgets.mixin import copy_mixin
 from dayu_widgets.mixin import cursor_mixin
 from dayu_widgets.mixin import property_mixin
@@ -35,7 +33,6 @@ from dayu_widgets.mixin import stacked_animation_mixin
 from dayu_widgets.push_button import MPushButton
 from dayu_widgets.qt import defer
 from dayu_widgets.qt import is_signal_connected
-from dayu_widgets.tool_button import MToolButton
 
 
 class MTabEdit(MLineEdit):
@@ -50,14 +47,14 @@ class MTabEdit(MLineEdit):
         if event.type() == QtCore.QEvent.MouseButtonPress:
             is_window = receiver.__class__.__name__ == "QWindow"
             if not is_window and receiver is not self:
-                self.slot_edit_finish()
+                self.editingFinished.emit()
         return super(MTabEdit, self).eventFilter(receiver, event)
 
     def slot_edit_finish(self):
         text = self.text()
         index = self.bar.currentIndex()
         tab_widget = self.bar.parent()
-        if isinstance(text, MTabWidget):
+        if isinstance(text, MDraggableTabWidget):
             widget = tab_widget.widget(index)
             widget.setWindowTitle(text)
         self.bar.setTabText(index, text)
@@ -69,29 +66,108 @@ class MTabEdit(MLineEdit):
         return super(MTabEdit, self).keyPressEvent(event)
 
 
-class MOverlayBase(QtWidgets.QWidget):
+@cursor_mixin
+class MTabBar(QtWidgets.QTabBar):
+    def __init__(self, *args, **kwargs):
+        super(MTabBar, self).__init__(*args, **kwargs)
+        self.setDrawBase(False)
+
+    def tabSizeHint(self, index):
+        tab_text = self.tabText(index)
+        offset = 70 if self.tabsClosable() else 50
+        return QtCore.QSize(
+            self.fontMetrics().width(tab_text) + offset,
+            self.fontMetrics().height() + 20,
+        )
+
+
+@property_mixin
+@stacked_animation_mixin
+class MTabWidget(QtWidgets.QTabWidget):
+    def __init__(self, *args, **kwargs):
+        super(MTabWidget, self).__init__(*args, **kwargs)
+        self.bar = MTabBar()
+        self.setTabBar(self.bar)
+        self.tabBarDoubleClicked.connect(self.rename_tab)
+
+        self.setProperty("renameable", True)
+        self.setProperty("animatable", True)
+
+    def _set_animatable(self, value):
+        if not value:
+            self.disable_animation()
+
+    def disable_animation(self):
+        self.currentChanged.disconnect(self._play_anim)
+
+    def rename_tab(self, index):
+        if not self.property("renameable"):
+            return
+
+        tab_text = self.tabText(index)
+        edit = MTabEdit(tab_text, self)
+        edit.setParent(self)
+        rect = self.bar.tabRect(index)
+        edit.setGeometry(rect)
+        edit.show()
+        edit.setFocus()
+
+
+class MDraggableTabBar(MTabBar):
+
+    sig_start_drag = QtCore.Signal(int)
+    sig_bar_press = QtCore.Signal(QtWidgets.QTabBar)
+    sig_bar_menu = QtCore.Signal(int)
+
+    def __init__(self, *args, **kwargs):
+        super(MDraggableTabBar, self).__init__(*args, **kwargs)
+        self.is_dragging = False
+        self.setProperty("draggable", True)
+        self.setMouseTracking(True)
+
+    def mousePressEvent(self, event):
+        if event.buttons() == QtCore.Qt.LeftButton:
+            self.is_dragging = True
+            self.sig_bar_press.emit(self)
+        return super(MDraggableTabBar, self).mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        index = self.currentIndex()
+        condition = self.is_dragging
+        condition &= event.buttons() == QtCore.Qt.LeftButton
+        condition &= bool(self.count())
+        condition &= index != -1
+        # NOTES(timmyliang): trigger when it drag out of tabbar
+        condition &= not self.rect().contains(event.pos())
+        condition &= bool(self.property("draggable"))
+        if condition:
+            self.sig_start_drag.emit(index)
+        return super(MDraggableTabBar, self).mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self.is_dragging and event.buttons() == QtCore.Qt.LeftButton:
+            self.is_dragging = False
+        return super(MDraggableTabBar, self).mouseReleaseEvent(event)
+
+    def focusOutEvent(self, event):
+        if self.is_dragging:
+            self.is_dragging = False
+        return super(MDraggableTabBar, self).focusOutEvent(event)
+
+    def contextMenuEvent(self, event):
+        index = self.tabAt(event.pos())
+        self.sig_bar_menu.emit(index)
+        return super(MDraggableTabBar, self).contextMenuEvent(event)
+
+
+class MTabOverlay(QtWidgets.QWidget):
     sig_painted = QtCore.Signal(QtGui.QPainter)
 
     def __init__(self, parent):
-        super(MOverlayBase, self).__init__(parent)
+        super(MTabOverlay, self).__init__(parent)
         self.setAttribute(QtCore.Qt.WA_NoSystemBackground)
         self.setFocusPolicy(QtCore.Qt.NoFocus)
         parent.installEventFilter(self)
-
-    def eventFilter(self, obj, event):
-        if event.type() & (QtCore.QEvent.Resize | QtCore.QEvent.Show):
-            self.setGeometry(obj.rect())
-        return False
-
-    def paintEvent(self, event):
-        painter = QtGui.QPainter(self)
-        self.sig_painted.emit(painter)
-        super(MOverlayBase, self).paintEvent(event)
-
-
-class MTabOverlay(MOverlayBase):
-    def __init__(self, parent):
-        super(MTabOverlay, self).__init__(parent)
 
         self.button = MPushButton()
         self.button.setText(self.tr("Remove"))
@@ -106,172 +182,19 @@ class MTabOverlay(MOverlayBase):
         layout.addLayout(inside_layout)
         self.setLayout(layout)
 
-
-@property_mixin
-class MBarOverlay(MOverlayBase):
-    def __init__(self, parent):
-        super(MBarOverlay, self).__init__(parent)
-
-        self.tab = parent
-
-        layout = QtWidgets.QHBoxLayout()
-        self.setLayout(layout)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        down_tool = MToolButton().svg("down_line.svg").small()
-        down_tool.clicked.connect(self.slot_tab_menu)
-        float_tool = MToolButton().svg("float.svg").small()
-        float_tool.clicked.connect(lambda *args: parent.slot_dropped_outside())
-        close_tool = MToolButton().svg("close_line.svg").small()
-        close_tool.clicked.connect(parent.deleteLater)
-
-        layout.addStretch()
-        layout.addWidget(down_tool)
-        layout.addWidget(float_tool)
-        layout.addWidget(close_tool)
-
-        self.opacity_widget = QtWidgets.QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_widget)
-        self.setAutoFillBackground(True)
-
-        self._opacity_anim = QtCore.QPropertyAnimation(self.opacity_widget, b"opacity")
-        self.setProperty("animOpacityDuration", 300)
-        self.setProperty("animOpacityCurve", "OutCubic")
-        self.setProperty("animOpacityStart", 0)
-        self.setProperty("animOpacityEnd", 1)
-        self.setProperty("opacityAnimatable", False)
-
-    def _set_opacityAnimatable(self, value):
-        value = 0 if value else 1
-        self.opacity_widget.setOpacity(value)
-
-    def _set_animOpacityDuration(self, value):
-        self._opacity_anim.setDuration(value)
-
-    def _set_animOpacityCurve(self, value):
-        curve = getattr(QtCore.QEasingCurve, value, None)
-        if not curve:
-            raise TypeError("Invalid QEasingCurve")
-        self._opacity_anim.setEasingCurve(curve)
-
-    def _set_animOpacityStart(self, value):
-        self._opacity_anim.setStartValue(value)
-
-    def _set_animOpacityEnd(self, value):
-        self._opacity_anim.setEndValue(value)
-
     def eventFilter(self, obj, event):
-        if event.type() in (QtCore.QEvent.Resize, QtCore.QEvent.Paint):
-            self.move(obj.bar.width(), 0)
-            self.setFixedWidth(max(0, obj.width() - obj.bar.width()))
-            self.setFixedHeight(obj.bar.height())
-        if self.property("opacityAnimatable"):
-            if event.type() == QtCore.QEvent.Enter:
-                self._opacity_anim.setDirection(QtCore.QAbstractAnimation.Forward)
-                self._opacity_anim.start()
-            elif event.type() == QtCore.QEvent.Leave:
-                self._opacity_anim.setDirection(QtCore.QAbstractAnimation.Backward)
-                self._opacity_anim.start()
-
+        if event.type() & (QtCore.QEvent.Resize | QtCore.QEvent.Show):
+            self.setGeometry(obj.rect())
         return False
 
-    def slot_tab_menu(self):
-        menu = MMenu(parent=self)
-        menu.setProperty("searchable", True)
-        for index in range(self.tab.count()):
-            text = self.tab.tabText(index)
-            action = menu.addAction(text)
-            action.triggered.connect(partial(self.tab.setCurrentIndex, index))
-        menu.exec_(QtGui.QCursor.pos())
-
-
-@cursor_mixin
-class MTabBar(QtWidgets.QTabBar):
-
-    sig_start_drag = QtCore.Signal(int)
-    sig_bar_press = QtCore.Signal(QtWidgets.QTabBar)
-    sig_bar_menu = QtCore.Signal(int)
-
-    def __init__(self, *args, **kwargs):
-        super(MTabBar, self).__init__(*args, **kwargs)
-        self.is_dragging = False
-
-        self.setProperty("draggable", True)
-        self.setProperty("renameable", True)
-        self.setDrawBase(False)
-        self.setMouseTracking(True)
-
-        self.tabBarDoubleClicked.connect(self.rename_tab)
-
-        tab_widget = self.parent()
-        self.overlay = MBarOverlay(tab_widget)
-
-    def rename_tab(self, index):
-        if not self.property("renameable"):
-            return
-
-        tab_text = self.tabText(index)
-        edit = MTabEdit(tab_text, self)
-        edit.setParent(self)
-        rect = self.tabRect(index)
-        edit.setGeometry(rect)
-        edit.show()
-        edit.setFocus()
-
-    def tabSizeHint(self, index):
-        tab_text = self.tabText(index)
-        offset = 70 if self.tabsClosable() else 50
-        return QtCore.QSize(
-            self.fontMetrics().width(tab_text) + offset,
-            self.fontMetrics().height() + 20,
-        )
-
-    def mousePressEvent(self, event):
-        # type: (QtWidgets.QTabBar,QtGui.QMousePressEvent) -> None
-        super(MTabBar, self).mousePressEvent(event)
-        if event.buttons() == QtCore.Qt.LeftButton:
-            self.is_dragging = True
-            self.sig_bar_press.emit(self)
-
-    def mouseMoveEvent(self, event):
-        # type: (QtWidgets.QTabBar,QtGui.QMouseMoveEvent) -> None
-        super(MTabBar, self).mouseMoveEvent(event)
-        index = self.currentIndex()
-        condition = self.is_dragging
-        condition &= event.buttons() == QtCore.Qt.LeftButton
-        condition &= bool(self.count())
-        condition &= index != -1
-        # NOTES(timmyliang): trigger when it drag out of tabbar
-        condition &= not self.rect().contains(event.pos())
-        condition &= bool(self.property("draggable"))
-
-        if condition:
-            self.sig_start_drag.emit(index)
-
-    def mouseReleaseEvent(self, event):
-        # type: (QtWidgets.QTabBar,QtGui.QMouseReleaseEvent) -> None
-        super(MTabBar, self).mouseReleaseEvent(event)
-        if self.is_dragging and event.buttons() == QtCore.Qt.LeftButton:
-            self.is_dragging = False
-
-    def focusOutEvent(self, event):
-        # type: (QtWidgets.QTabBar,QtGui.QFocusOutEvent) -> None
-        super(MTabBar, self).focusOutEvent(event)
-        if self.is_dragging:
-            self.is_dragging = False
-
-    def contextMenuEvent(self, event):
-        # type: (QtWidgets.QTabBar,QtGui.QContextMenuEvent) -> None
-        super(MTabBar, self).contextMenuEvent(event)
-        index = self.tabAt(event.pos())
-        self.sig_bar_menu.emit(index)
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        self.sig_painted.emit(painter)
+        super(MTabOverlay, self).paintEvent(event)
 
 
 @copy_mixin
-@property_mixin
-@stacked_animation_mixin
-class MTabWidget(QtWidgets.QTabWidget):
+class MDraggableTabWidget(MTabWidget):
 
     DIRECTIONS = "E S W N"
     DIRECTION = namedtuple("Direction", DIRECTIONS)(0, 1, 2, 3)
@@ -281,13 +204,11 @@ class MTabWidget(QtWidgets.QTabWidget):
     MINE = "application/dayu_tab_data"
 
     def __init__(self, parent=None):
-        super(MTabWidget, self).__init__(parent=parent)
+        super(MDraggableTabWidget, self).__init__(parent=parent)
 
-        self.bar = MTabBar(self)
+        self.bar = MDraggableTabBar(self)
+        self.connect_bar(self.bar)
         self.setTabBar(self.bar)
-        self.bar.sig_start_drag.connect(self.slot_drag_tab)
-        self.bar.sig_bar_press.connect(self.slot_bar_press)
-        self.bar.sig_bar_menu.connect(lambda i: print("asd"))
 
         self.overlay = MTabOverlay(self)
         self.overlay.sig_painted.connect(self.slot_painted)
@@ -297,10 +218,7 @@ class MTabWidget(QtWidgets.QTabWidget):
         self.setProperty("hintOpacity", 0.5)
         self.setProperty("hintColor", dayu_theme.blue)
 
-        self.setProperty("draggable", False)
-        self.setProperty("renameable", False)
-        self.setProperty("showBarOverlay", False)
-        self.setProperty("autoHideBarOverlay", False)
+        self.setProperty("draggable", True)
 
         self.is_in_container = False
         self.is_new_window = True
@@ -311,18 +229,14 @@ class MTabWidget(QtWidgets.QTabWidget):
 
         self._validate_tab_count()
 
+    def connect_bar(self, bar):
+        bar.sig_start_drag.connect(self.slot_drag_tab)
+        bar.sig_bar_press.connect(self.slot_bar_press)
+        bar.sig_bar_menu.connect(lambda i: print("asd"))
+
     def _set_draggable(self, value):
         self.setAcceptDrops(value)
         self.bar.setProperty("draggable", value)
-
-    def _set_renameable(self, value):
-        self.bar.setProperty("renameable", value)
-
-    def _set_showBarOverlay(self, value):
-        self.bar.overlay.setVisible(value)
-
-    def _set_autoHideBarOverlay(self, value):
-        self.bar.overlay.setProperty("opacityAnimatable", value)
 
     @property
     def is_dragging(self):
@@ -424,7 +338,7 @@ class MTabWidget(QtWidgets.QTabWidget):
         painter.fillRect(rect, color)
 
     def dragEnterEvent(self, event):
-        super(MTabWidget, self).dragEnterEvent(event)
+        super(MDraggableTabWidget, self).dragEnterEvent(event)
         self.is_dragging = True
         if self._get_drag_data(event):
             rect = self.rect()
@@ -466,19 +380,19 @@ class MTabWidget(QtWidgets.QTabWidget):
             event.accept()
 
     def dragMoveEvent(self, event):
-        super(MTabWidget, self).dragMoveEvent(event)
+        super(MDraggableTabWidget, self).dragMoveEvent(event)
         if self._get_drag_data(event):
             self.overlay.repaint()
             event.accept()
 
     def dropEvent(self, event):
-        super(MTabWidget, self).dropEvent(event)
+        super(MDraggableTabWidget, self).dropEvent(event)
 
         self.is_dragging = False
         buff = self._get_drag_data(event)
         index = cPickle.loads(buff)
         source = event.source()
-        assert isinstance(source, MTabWidget), "unknown drop error"
+        assert isinstance(source, MDraggableTabWidget), "unknown drop error"
 
         source.is_new_window = False
         label = source.tabText(index)
@@ -493,7 +407,7 @@ class MTabWidget(QtWidgets.QTabWidget):
         self._validate_tab_count()
 
     def dragLeaveEvent(self, event):
-        super(MTabWidget, self).dragLeaveEvent(event)
+        super(MDraggableTabWidget, self).dragLeaveEvent(event)
         self.is_dragging = False
         if not self.count():
             self.overlay.setVisible(True)
@@ -501,7 +415,7 @@ class MTabWidget(QtWidgets.QTabWidget):
 
     def tabRemoved(self, *args):
         self._validate_tab_count()
-        return super(MTabWidget, self).tabRemoved(*args)
+        return super(MDraggableTabWidget, self).tabRemoved(*args)
 
     @defer
     def _validate_tab_count(self):
@@ -513,11 +427,6 @@ class MTabWidget(QtWidgets.QTabWidget):
             self.overlay.repaint()
             self.overlay.setVisible(not count)
             self.overlay.button.setVisible(not count)
-
-            # if count == 1:
-            #     self.bar.setVisible(False)
-            # elif not self.bar.isVisible():
-            #     self.bar.setVisible(True)
 
     def _get_drag_data(self, event):
         data = event.mimeData()
