@@ -30,14 +30,11 @@ class SplitterExample(QtWidgets.QWidget):
         self.setLayout(layout)
 
         workspace = MWorkspace()
-        # workspace.addTab(MTextEdit(), "拖拽一")
-        # workspace.addTab(MTextEdit(), "拖拽二")
-        # workspace.addTab(MTextEdit(), "拖拽三")
 
-        workspace.addWidget(MTextEdit("widget1"), "test")
-        workspace.addWidget(MTextEdit("widget2"))
-        workspace.addWidget(MTextEdit("widget3"))
-        self.resize(800, 800)
+        for index in range(0, 5):
+            text = "widget %s" % index
+            workspace.addWidget(MTextEdit(text), text)
+        self.resize(1600, 800)
 
         layout.addWidget(workspace)
 

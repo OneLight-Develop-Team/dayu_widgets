@@ -36,6 +36,8 @@ class MBarOverlay(QtWidgets.QWidget):
         self.setAttribute(QtCore.Qt.WA_NoSystemBackground)
         self.setFocusPolicy(QtCore.Qt.NoFocus)
         parent.installEventFilter(self)
+        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda: print(1))
 
         self.tab = parent
 
@@ -110,29 +112,19 @@ class MBarOverlay(QtWidgets.QWidget):
         menu.exec_(QtGui.QCursor.pos())
 
 
-class MWorkspaceTabBar(MDraggableTabBar):
-    def __init__(self, *args, **kwargs):
-        super(MWorkspaceTabBar, self).__init__(*args, **kwargs)
-        tab_widget = self.parent()
-        self.overlay = MBarOverlay(tab_widget)
-
-
 class MWorkspaceTabWidget(MDraggableTabWidget):
     def __init__(self, *args, **kwargs):
         super(MWorkspaceTabWidget, self).__init__(*args, **kwargs)
 
-        self.bar = MWorkspaceTabBar(self)
-        self.connect_bar(self.bar)
-        self.setTabBar(self.bar)
-
+        self.bar_overlay = MBarOverlay(self)
         self.setProperty("showBarOverlay", False)
         self.setProperty("autoHideBarOverlay", False)
 
     def _set_showBarOverlay(self, value):
-        self.bar.overlay.setVisible(value)
+        self.bar_overlay.setVisible(value)
 
     def _set_autoHideBarOverlay(self, value):
-        self.bar.overlay.setProperty("opacityAnimatable", value)
+        self.bar_overlay.setProperty("opacityAnimatable", value)
 
 
 @copy_mixin
@@ -179,13 +171,11 @@ class MWorkspace(MSplitter):
         drop_parent = drop_widget.parent()
         # drag_parent = drag_widget.parent()
         drop_id = drop_parent.indexOf(drop_widget)
-        # drag_parent = drag_widget.parent()
-        # drag_id = self.indexOf(drag_widget)
         print("drop_id", drop_id)
 
         orient = QtCore.Qt.Vertical if direction in [1, 3] else QtCore.Qt.Horizontal
         is_after = direction in [0, 1]
-        if orient == self.orientation():
+        if orient == drop_parent.orientation():
             insert_id = drop_id
             tab_widget = drag_widget
             if drag_widget.count() > 1:
@@ -198,18 +188,19 @@ class MWorkspace(MSplitter):
             #         insert_id += 1
             #     else:
             #         insert_id -= 1
-
             print("insert_id", insert_id)
-            return super(MWorkspace, self).insertWidget(insert_id, tab_widget)
+            return super(MWorkspace, drop_parent).insertWidget(insert_id, tab_widget)
 
         workspace = self.copy()
         workspace.setOrientation(orient)
+        if drag_widget is drop_widget:
+            drop_widget = drag_widget.copy()
         widgets = [drop_widget, drag_widget]
         widgets = widgets if is_after else reversed(widgets)
         for widget in widgets:
             super(MWorkspace, workspace).addWidget(widget)
 
-        super(MWorkspace, drop_parent).insertWidget(drop_id, workspace)
+        super(MWorkspace, drop_parent).insertWidget(max(0, drop_id), workspace)
 
     def _create_tab_widget(self, widget, title="", source=None):
         tab_widget = source.copy() if source else MWorkspaceTabWidget()

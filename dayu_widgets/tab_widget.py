@@ -208,7 +208,9 @@ class MDraggableTabWidget(MTabWidget):
         super(MDraggableTabWidget, self).__init__(parent=parent)
 
         self.bar = MDraggableTabBar(self)
-        self.connect_bar(self.bar)
+        self.bar.sig_start_drag.connect(self.slot_drag_tab)
+        self.bar.sig_bar_press.connect(self.slot_bar_press)
+        self.bar.sig_bar_menu.connect(self.slot_bar_menu)
         self.setTabBar(self.bar)
 
         self.overlay = MTabOverlay(self)
@@ -229,11 +231,6 @@ class MDraggableTabWidget(MTabWidget):
         self.rect_data = defaultdict(dict)
 
         self._validate_tab_count()
-
-    def connect_bar(self, bar):
-        bar.sig_start_drag.connect(self.slot_drag_tab)
-        bar.sig_bar_press.connect(self.slot_bar_press)
-        bar.sig_bar_menu.connect(self.slot_bar_menu)
 
     def _set_draggable(self, value):
         self.setAcceptDrops(value)
@@ -298,7 +295,7 @@ class MDraggableTabWidget(MTabWidget):
             menu.addAction(E_action)
             menu.addSeparator()
 
-        window_action = QtWidgets.QAction(self.tr("Split to Window"))
+        window_action = QtWidgets.QAction(self.tr("detach"))
         window_action.triggered.connect(partial(self.slot_dropped_outside, index))
         menu.addAction(window_action)
         menu.addSeparator()
