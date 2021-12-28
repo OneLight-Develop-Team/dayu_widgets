@@ -26,6 +26,7 @@ from six.moves import cPickle
 # Import local modules
 from dayu_widgets import dayu_theme
 from dayu_widgets.line_edit import MLineEdit
+from dayu_widgets.menu import MMenu
 from dayu_widgets.mixin import copy_mixin
 from dayu_widgets.mixin import cursor_mixin
 from dayu_widgets.mixin import property_mixin
@@ -232,7 +233,7 @@ class MDraggableTabWidget(MTabWidget):
     def connect_bar(self, bar):
         bar.sig_start_drag.connect(self.slot_drag_tab)
         bar.sig_bar_press.connect(self.slot_bar_press)
-        bar.sig_bar_menu.connect(lambda i: print("asd"))
+        bar.sig_bar_menu.connect(self.slot_bar_menu)
 
     def _set_draggable(self, value):
         self.setAcceptDrops(value)
@@ -248,10 +249,8 @@ class MDraggableTabWidget(MTabWidget):
         self._is_dragging = value
 
     def slot_drag_tab(self, index):
-        # type: (QtWidgets.QTabWidget,int) -> None
         drag = QtGui.QDrag(self)
-        data = QtCore.QMimeData(self)
-
+        data = QtCore.QMimeData()
         buff = cPickle.dumps(index)
         data.setData(self.MINE, QtCore.QByteArray(buff))
         drag.setMimeData(data)
@@ -274,10 +273,41 @@ class MDraggableTabWidget(MTabWidget):
 
         drag.setPixmap(pixmap)
         drag.destroyed.connect(partial(self.slot_dropped_outside, index))
-        drag.start(QtCore.Qt.MoveAction)
+        drag.exec_(QtCore.Qt.MoveAction)
 
     def slot_bar_press(self, bar):
         self.bar_pixmap = bar.grab(bar.tabRect(bar.currentIndex()))
+
+    def slot_bar_menu(self, index):
+        menu = MMenu(parent=self)
+        if is_signal_connected(self, "sig_border_drop"):
+            callback = lambda direction: self.sig_border_drop.emit(
+                self, index, direction
+            )
+            N_action = QtWidgets.QAction(self.tr("Split on Top"))
+            N_action.triggered.connect(partial(callback, self.DIRECTION.N))
+            menu.addAction(N_action)
+            W_action = QtWidgets.QAction(self.tr("Split on Left"))
+            W_action.triggered.connect(partial(callback, self.DIRECTION.W))
+            menu.addAction(W_action)
+            S_action = QtWidgets.QAction(self.tr("Split on Bottom"))
+            S_action.triggered.connect(partial(callback, self.DIRECTION.S))
+            menu.addAction(S_action)
+            E_action = QtWidgets.QAction(self.tr("Split on Right"))
+            E_action.triggered.connect(partial(callback, self.DIRECTION.E))
+            menu.addAction(E_action)
+            menu.addSeparator()
+
+        window_action = QtWidgets.QAction(self.tr("Split to Window"))
+        window_action.triggered.connect(partial(self.slot_dropped_outside, index))
+        menu.addAction(window_action)
+        menu.addSeparator()
+
+        close_action = QtWidgets.QAction(self.tr("close"))
+        close_action.triggered.connect(partial(self.removeTab, index))
+        menu.addAction(close_action)
+
+        menu.exec_(QtGui.QCursor.pos())
 
     def slot_dropped_outside(self, index=-1):
 
